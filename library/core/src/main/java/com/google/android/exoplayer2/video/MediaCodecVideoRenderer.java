@@ -1079,7 +1079,10 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
         || (("tcl_eu".equals(Util.DEVICE) || "SVP-DTV15".equals(Util.DEVICE)
         || "BRAVIA_ATV2".equals(Util.DEVICE))
         && "OMX.MTK.VIDEO.DECODER.AVC".equals(name))
-        || (("g9x".equals(Util.DEVICE) || "p212".equals(Util.DEVICE))
+        || (("g9x".equals(Util.DEVICE) // ShiningWorth G9SX (amlogic) Android 6.0.1
+            || "p212".equals(Util.DEVICE) // Milo DX5
+            || "q201_9377".equals(Util.DEVICE) // Milo DX5 Plus
+            || "q8723bs".equals(Util.DEVICE)) // Milo TVOne
         && "OMX.amlogic.avc.decoder.awesome".equals(name));
   }
 
