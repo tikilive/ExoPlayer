@@ -15,6 +15,8 @@
  */
 package com.google.android.exoplayer2.extractor.mp4;
 
+import static com.google.android.exoplayer2.util.MimeTypes.getMimeTypeFromMp4ObjectType;
+
 import android.util.Log;
 import android.util.Pair;
 import com.google.android.exoplayer2.C;
@@ -50,6 +52,12 @@ import java.util.List;
   private static final int TYPE_subt = Util.getIntegerCodeForString("subt");
   private static final int TYPE_clcp = Util.getIntegerCodeForString("clcp");
   private static final int TYPE_meta = Util.getIntegerCodeForString("meta");
+
+  /**
+   * The threshold number of samples to trim from the start/end of an audio track when applying an
+   * edit below which gapless info can be used (rather than removing samples from the sample table).
+   */
+  private static final int MAX_GAPLESS_TRIM_SIZE_SAMPLES = 3;
 
   /**
    * Parses a trak atom (defined in 14496-12).
@@ -181,11 +189,13 @@ import java.util.List;
       }
     }
 
-    // True if we can rechunk fixed-sample-size data. Note that we only rechunk raw audio.
-    boolean isRechunkable = sampleSizeBox.isFixedSampleSize()
-        && MimeTypes.AUDIO_RAW.equals(track.format.sampleMimeType)
-        && remainingTimestampDeltaChanges == 0 && remainingTimestampOffsetChanges == 0
-        && remainingSynchronizationSamples == 0;
+    // Fixed sample size raw audio may need to be rechunked.
+    boolean isFixedSampleSizeRawAudio =
+        sampleSizeBox.isFixedSampleSize()
+            && MimeTypes.AUDIO_RAW.equals(track.format.sampleMimeType)
+            && remainingTimestampDeltaChanges == 0
+            && remainingTimestampOffsetChanges == 0
+            && remainingSynchronizationSamples == 0;
 
     long[] offsets;
     int[] sizes;
@@ -195,7 +205,7 @@ import java.util.List;
     long timestampTimeUnits = 0;
     long duration;
 
-    if (!isRechunkable) {
+    if (!isFixedSampleSizeRawAudio) {
       offsets = new long[sampleCount];
       sizes = new int[sampleCount];
       timestamps = new long[sampleCount];
@@ -288,7 +298,8 @@ import java.util.List;
         chunkOffsetsBytes[chunkIterator.index] = chunkIterator.offset;
         chunkSampleCounts[chunkIterator.index] = chunkIterator.numSamples;
       }
-      int fixedSampleSize = sampleSizeBox.readNextSampleSize();
+      int fixedSampleSize =
+          Util.getPcmFrameSize(track.format.pcmEncoding, track.format.channelCount);
       FixedSampleSizeRechunker.Results rechunkedResults = FixedSampleSizeRechunker.rechunk(
           fixedSampleSize, chunkOffsetsBytes, chunkSampleCounts, timestampDeltaInTimeUnits);
       offsets = rechunkedResults.offsets;
@@ -309,22 +320,18 @@ import java.util.List;
 
     // See the BMFF spec (ISO 14496-12) subsection 8.6.6. Edit lists that require prerolling from a
     // sync sample after reordering are not supported. Partial audio sample truncation is only
-    // supported in edit lists with one edit that removes less than one sample from the start/end of
-    // the track, for gapless audio playback. This implementation handles simple discarding/delaying
-    // of samples. The extractor may place further restrictions on what edited streams are playable.
+    // supported in edit lists with one edit that removes less than MAX_GAPLESS_TRIM_SIZE_SAMPLES
+    // samples from the start/end of the track. This implementation handles simple
+    // discarding/delaying of samples. The extractor may place further restrictions on what edited
+    // streams are playable.
 
-    if (track.editListDurations.length == 1 && track.type == C.TRACK_TYPE_AUDIO
+    if (track.editListDurations.length == 1
+        && track.type == C.TRACK_TYPE_AUDIO
         && timestamps.length >= 2) {
-      // Handle the edit by setting gapless playback metadata, if possible. This implementation
-      // assumes that only one "roll" sample is needed, which is the case for AAC, so the start/end
-      // points of the edit must lie within the first/last samples respectively.
       long editStartTime = track.editListMediaTimes[0];
       long editEndTime = editStartTime + Util.scaleLargeTimestamp(track.editListDurations[0],
           track.timescale, track.movieTimescale);
-      if (timestamps[0] <= editStartTime
-          && editStartTime < timestamps[1]
-          && timestamps[timestamps.length - 1] < editEndTime
-          && editEndTime <= duration) {
+      if (canApplyEditWithGaplessInfo(timestamps, duration, editStartTime, editEndTime)) {
         long paddingTimeUnits = duration - editEndTime;
         long encoderDelay = Util.scaleLargeTimestamp(editStartTime - timestamps[0],
             track.format.sampleRate, track.timescale);
@@ -1030,47 +1037,11 @@ import java.util.List;
 
     // Set the MIME type based on the object type indication (14496-1 table 5).
     int objectTypeIndication = parent.readUnsignedByte();
-    String mimeType;
-    switch (objectTypeIndication) {
-      case 0x60:
-      case 0x61:
-        mimeType = MimeTypes.VIDEO_MPEG2;
-        break;
-      case 0x20:
-        mimeType = MimeTypes.VIDEO_MP4V;
-        break;
-      case 0x21:
-        mimeType = MimeTypes.VIDEO_H264;
-        break;
-      case 0x23:
-        mimeType = MimeTypes.VIDEO_H265;
-        break;
-      case 0x6B:
-        mimeType = MimeTypes.AUDIO_MPEG;
-        return Pair.create(mimeType, null);
-      case 0x40:
-      case 0x66:
-      case 0x67:
-      case 0x68:
-        mimeType = MimeTypes.AUDIO_AAC;
-        break;
-      case 0xA5:
-        mimeType = MimeTypes.AUDIO_AC3;
-        break;
-      case 0xA6:
-        mimeType = MimeTypes.AUDIO_E_AC3;
-        break;
-      case 0xA9:
-      case 0xAC:
-        mimeType = MimeTypes.AUDIO_DTS;
-        return Pair.create(mimeType, null);
-      case 0xAA:
-      case 0xAB:
-        mimeType = MimeTypes.AUDIO_DTS_HD;
-        return Pair.create(mimeType, null);
-      default:
-        mimeType = null;
-        break;
+    String mimeType = getMimeTypeFromMp4ObjectType(objectTypeIndication);
+    if (MimeTypes.AUDIO_MPEG.equals(mimeType)
+        || MimeTypes.AUDIO_DTS.equals(mimeType)
+        || MimeTypes.AUDIO_DTS_HD.equals(mimeType)) {
+      return Pair.create(mimeType, null);
     }
 
     parent.skipBytes(12);
@@ -1214,6 +1185,19 @@ import java.util.List;
     return size;
   }
 
+  /** Returns whether it's possible to apply the specified edit using gapless playback info. */
+  private static boolean canApplyEditWithGaplessInfo(
+      long[] timestamps, long duration, long editStartTime, long editEndTime) {
+    int lastIndex = timestamps.length - 1;
+    int latestDelayIndex = Util.constrainValue(MAX_GAPLESS_TRIM_SIZE_SAMPLES, 0, lastIndex);
+    int earliestPaddingIndex =
+        Util.constrainValue(timestamps.length - MAX_GAPLESS_TRIM_SIZE_SAMPLES, 0, lastIndex);
+    return timestamps[0] <= editStartTime
+        && editStartTime < timestamps[latestDelayIndex]
+        && timestamps[earliestPaddingIndex] < editEndTime
+        && editEndTime <= duration;
+  }
+
   private AtomParsers() {
     // Prevent instantiation.
   }
@@ -1243,7 +1227,7 @@ import java.util.List;
       stsc.setPosition(Atom.FULL_HEADER_SIZE);
       remainingSamplesPerChunkChanges = stsc.readUnsignedIntToInt();
       Assertions.checkState(stsc.readInt() == 1, "first_chunk must be 1");
-      index = C.INDEX_UNSET;
+      index = -1;
     }
 
     public boolean moveNext() {
