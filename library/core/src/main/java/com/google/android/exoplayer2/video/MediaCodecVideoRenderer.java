@@ -1117,11 +1117,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
         || (("ALE-L21".equals(Util.MODEL) // Huawei P8 Lite
                 || "CAM-L21".equals(Util.MODEL)) // Huawei Y6II
             && "OMX.k3.video.decoder.avc".equals(name))
-        || (("g9x".equals(Util.DEVICE) // ShiningWorth G9SX (amlogic) Android 6.0.1
-                || "p212".equals(Util.DEVICE) // Milo DX5
-                || "q201_9377".equals(Util.DEVICE) // Milo DX5 Plus
-                || "q8723bs".equals(Util.DEVICE)) // Milo TVOne
-            && "OMX.amlogic.avc.decoder.awesome".equals(name));
+        || "OMX.amlogic.avc.decoder.awesome".equals(name); // ShiningWorth G9SX (amlogic) Android 6.0.1, Milo DX5, Milo DX5 Plus, Milo TVOne
   }
 
   /**
