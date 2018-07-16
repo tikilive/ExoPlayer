@@ -1199,7 +1199,8 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
         || (("ALE-L21".equals(Util.MODEL) // Huawei P8 Lite
                 || "CAM-L21".equals(Util.MODEL)) // Huawei Y6II
             && "OMX.k3.video.decoder.avc".equals(name))
-        || "OMX.amlogic.avc.decoder.awesome".equals(name); // ShiningWorth G9SX (amlogic) Android 6.0.1, Milo DX5, Milo DX5 Plus, Milo TVOne
+        || "OMX.amlogic.avc.decoder.awesome".equals(name) // ShiningWorth G9SX (amlogic) Android 6.0.1, Milo DX5, Milo DX5 Plus, Milo TVOne
+        || "OMX.amlogic.hevc.decoder.awesome".equals(name); // h265 for woplay amlogic devices
   }
 
   protected static final class CodecMaxValues {
