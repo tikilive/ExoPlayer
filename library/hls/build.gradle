@@ -16,7 +16,6 @@ apply plugin: 'com.android.library'
 
 android {
     compileSdkVersion project.ext.compileSdkVersion
-    buildToolsVersion project.ext.buildToolsVersion
 
     defaultConfig {
         minSdkVersion project.ext.minSdkVersion
@@ -30,6 +29,7 @@ android {
         //    testCoverageEnabled = true
         // }
     }
+    buildToolsVersion '28.0.2'
 }
 
 dependencies {
