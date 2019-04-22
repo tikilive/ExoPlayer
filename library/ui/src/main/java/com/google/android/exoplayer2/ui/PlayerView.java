@@ -54,6 +54,7 @@ import com.google.android.exoplayer2.Player.VideoComponent;
 import com.google.android.exoplayer2.metadata.Metadata;
 import com.google.android.exoplayer2.metadata.id3.ApicFrame;
 import com.google.android.exoplayer2.source.TrackGroupArray;
+import com.google.android.exoplayer2.source.ads.AdsLoader;
 import com.google.android.exoplayer2.text.Cue;
 import com.google.android.exoplayer2.text.TextOutput;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
@@ -69,6 +70,7 @@ import com.google.android.exoplayer2.video.VideoListener;
 import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -221,6 +223,11 @@ import java.util.List;
  *       <ul>
  *         <li>Type: {@link PlayerControlView}
  *       </ul>
+ *   <li><b>{@code exo_ad_overlay}</b> - A {@link FrameLayout} positioned on top of the player which
+ *       is used to show ad UI (if applicable).
+ *       <ul>
+ *         <li>Type: {@link FrameLayout}
+ *       </ul>
  *   <li><b>{@code exo_overlay}</b> - A {@link FrameLayout} positioned on top of the player which
  *       the app can access via {@link #getOverlayFrameLayout()}, provided for convenience.
  *       <ul>
@@ -239,7 +246,7 @@ import java.util.List;
  * PlayerView. This will cause the specified layout to be inflated instead of {@code
  * exo_player_view.xml} for only the instance on which the attribute is set.
  */
-public class PlayerView extends FrameLayout {
+public class PlayerView extends FrameLayout implements AdsLoader.AdViewProvider {
 
   // LINT.IfChange
   /**
@@ -278,9 +285,10 @@ public class PlayerView extends FrameLayout {
   private final SubtitleView subtitleView;
   @Nullable private final View bufferingView;
   @Nullable private final TextView errorMessageView;
-  private final PlayerControlView controller;
+  @Nullable private final PlayerControlView controller;
   private final ComponentListener componentListener;
-  private final FrameLayout overlayFrameLayout;
+  @Nullable private final FrameLayout adOverlayFrameLayout;
+  @Nullable private final FrameLayout overlayFrameLayout;
 
   private Player player;
   private boolean useController;
@@ -317,6 +325,7 @@ public class PlayerView extends FrameLayout {
       errorMessageView = null;
       controller = null;
       componentListener = null;
+      adOverlayFrameLayout = null;
       overlayFrameLayout = null;
       ImageView logo = new ImageView(context);
       if (Util.SDK_INT >= 23) {
@@ -410,6 +419,9 @@ public class PlayerView extends FrameLayout {
     } else {
       surfaceView = null;
     }
+
+    // Ad overlay frame layout.
+    adOverlayFrameLayout = findViewById(R.id.exo_ad_overlay);
 
     // Overlay frame layout.
     overlayFrameLayout = findViewById(R.id.exo_overlay);
@@ -679,8 +691,9 @@ public class PlayerView extends FrameLayout {
   /**
    * Sets whether the currently displayed video frame or media artwork is kept visible when the
    * player is reset. A player reset is defined to mean the player being re-prepared with different
-   * media, {@link Player#stop(boolean)} being called with {@code reset=true}, or the player being
-   * replaced or cleared by calling {@link #setPlayer(Player)}.
+   * media, the player transitioning to unprepared media, {@link Player#stop(boolean)} being called
+   * with {@code reset=true}, or the player being replaced or cleared by calling {@link
+   * #setPlayer(Player)}.
    *
    * <p>If enabled, the currently displayed video frame or media artwork will be kept visible until
    * the player set on the view has been successfully prepared with new media and loaded enough of
@@ -757,10 +770,6 @@ public class PlayerView extends FrameLayout {
   @Override
   public boolean dispatchKeyEvent(KeyEvent event) {
     if (player != null && player.isPlayingAd()) {
-      // Focus any overlay UI now, in case it's provided by a WebView whose contents may update
-      // dynamically. This is needed to make the "Skip ad" button focused on Android TV when using
-      // IMA [Internal: b/62371030].
-      overlayFrameLayout.requestFocus();
       return super.dispatchKeyEvent(event);
     }
     boolean isDpadWhenControlHidden =
@@ -1015,6 +1024,7 @@ public class PlayerView extends FrameLayout {
    * @return The overlay {@link FrameLayout}, or {@code null} if the layout has been customized and
    *     the overlay is not present.
    */
+  @Nullable
   public FrameLayout getOverlayFrameLayout() {
     return overlayFrameLayout;
   }
@@ -1034,6 +1044,12 @@ public class PlayerView extends FrameLayout {
     if (ev.getActionMasked() != MotionEvent.ACTION_DOWN) {
       return false;
     }
+    return performClick();
+  }
+
+  @Override
+  public boolean performClick() {
+    super.performClick();
     return toggleControllerVisibility();
   }
 
@@ -1091,6 +1107,28 @@ public class PlayerView extends FrameLayout {
           contentView instanceof SphericalSurfaceView ? 0 : contentAspectRatio);
     }
   }
+
+  // AdsLoader.AdViewProvider implementation.
+
+  @Override
+  public ViewGroup getAdViewGroup() {
+    return Assertions.checkNotNull(
+        adOverlayFrameLayout, "exo_ad_overlay must be present for ad playback");
+  }
+
+  @Override
+  public View[] getAdOverlayViews() {
+    ArrayList<View> overlayViews = new ArrayList<>();
+    if (overlayFrameLayout != null) {
+      overlayViews.add(overlayFrameLayout);
+    }
+    if (controller != null) {
+      overlayViews.add(controller);
+    }
+    return overlayViews.toArray(new View[0]);
+  }
+
+  // Internal methods.
 
   private boolean toggleControllerVisibility() {
     if (!useController || player == null) {
